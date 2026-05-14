@@ -1,159 +1,255 @@
+/**
+ * =============================================================================
+ * DATABASE.TS - SQLite Database Setup & Initialization
+ * =============================================================================
+ *
+ * This file sets up our SQLite database - where all the app's data is stored.
+ *
+ * WHAT IS A DATABASE?
+ * A database is like a super-organized filing cabinet. Instead of paper files,
+ * it stores data in tables (like spreadsheets). Each table stores one type
+ * of thing (users, storyboards, scenes, etc.).
+ *
+ * WHY SQLite?
+ * SQLite is a simple database that stores everything in a single file.
+ * Perfect for small-to-medium apps. No separate server needed!
+ *
+ * TABLES IN THIS DATABASE:
+ * - users: Account information (email, password hash, name)
+ * - storyboards: Video plans created by users
+ * - scenes: Individual shots within a storyboard
+ * - visual_references: Images attached to scenes
+ * - comments: Feedback on storyboards/scenes
+ * - storyboard_collaborators: Who has access to what
+ * - storyboard_versions: Version history (snapshots)
+ * - templates: Pre-made storyboard structures
+ */
+
+// better-sqlite3 is a fast SQLite library for Node.js
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 
+
+// =========================================================================
+// DATABASE FILE LOCATION
+// =========================================================================
+
+// Where to store the database file
+// Can be overridden with DATABASE_PATH environment variable
 const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../../data/storyboard.db');
 
-// Ensure data directory exists
-import fs from 'fs';
+// Make sure the data directory exists
+// If not, create it (and any parent directories needed)
 const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
+
+// =========================================================================
+// CREATE DATABASE CONNECTION
+// =========================================================================
+
+// Create a new database connection (or open existing one)
 const db = new Database(dbPath);
 
 // Enable foreign keys
+// Foreign keys enforce relationships between tables
+// e.g., if you delete a storyboard, its scenes should also be deleted
 db.pragma('foreign_keys = ON');
 
+
+// =========================================================================
+// INITIALIZE DATABASE TABLES
+// =========================================================================
+/**
+ * This function creates all the tables if they don't already exist.
+ * Called when the server starts up.
+ *
+ * SQL EXPLAINED:
+ * - CREATE TABLE IF NOT EXISTS: Create table only if it doesn't exist
+ * - PRIMARY KEY: Unique identifier for each row
+ * - NOT NULL: This field is required
+ * - UNIQUE: No two rows can have the same value
+ * - DEFAULT: Value to use if not provided
+ * - FOREIGN KEY: Links to another table (e.g., user_id links to users.id)
+ * - ON DELETE CASCADE: If the parent is deleted, delete children too
+ */
 export function initializeDatabase() {
-  // Users table
+
+  // -------------------------------------------------------------------------
+  // USERS TABLE
+  // -------------------------------------------------------------------------
+  // Stores account information for registered users
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      name TEXT NOT NULL,
-      avatar_url TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      id TEXT PRIMARY KEY,           -- Unique user ID (UUID)
+      email TEXT UNIQUE NOT NULL,    -- Login email (must be unique)
+      password TEXT NOT NULL,        -- Hashed password (NEVER plain text!)
+      name TEXT NOT NULL,            -- Display name
+      avatar_url TEXT,               -- Profile picture URL (optional)
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,  -- When they signed up
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP   -- Last profile update
     )
   `);
 
-  // Storyboards table
+  // -------------------------------------------------------------------------
+  // STORYBOARDS TABLE
+  // -------------------------------------------------------------------------
+  // Main container for video plans
   db.exec(`
     CREATE TABLE IF NOT EXISTS storyboards (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT,
-      target_duration INTEGER,
-      template_type TEXT,
-      is_public INTEGER DEFAULT 0,
-      share_link TEXT UNIQUE,
+      id TEXT PRIMARY KEY,           -- Unique storyboard ID (UUID)
+      user_id TEXT NOT NULL,         -- Who owns this storyboard
+      title TEXT NOT NULL,           -- Video title
+      description TEXT,              -- Video description (optional)
+      target_duration INTEGER,       -- Goal length in seconds (optional)
+      template_type TEXT,            -- Which template was used (optional)
+      is_public INTEGER DEFAULT 0,   -- Is it publicly shared? (0=no, 1=yes)
+      share_link TEXT UNIQUE,        -- Unique sharing code (if public)
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      -- Link to users table: when user is deleted, their storyboards are too
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
-  // Scenes table
+  // -------------------------------------------------------------------------
+  // SCENES TABLE
+  // -------------------------------------------------------------------------
+  // Individual shots/clips within a storyboard
   db.exec(`
     CREATE TABLE IF NOT EXISTS scenes (
-      id TEXT PRIMARY KEY,
-      storyboard_id TEXT NOT NULL,
-      scene_order INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      shot_type TEXT NOT NULL,
-      camera_angle TEXT NOT NULL,
-      duration INTEGER NOT NULL,
-      scene_type TEXT NOT NULL,
-      location TEXT NOT NULL,
-      props TEXT DEFAULT '[]',
-      talent TEXT DEFAULT '[]',
-      lighting_notes TEXT,
-      audio_notes TEXT,
-      camera_movement TEXT,
-      equipment TEXT DEFAULT '[]',
-      time_of_day TEXT,
-      dialogue TEXT,
-      on_screen_text TEXT,
-      director_notes TEXT,
-      checklist TEXT DEFAULT '[]',
-      priority TEXT DEFAULT 'Medium',
-      status TEXT DEFAULT 'Not Started',
-      assigned_to TEXT,
-      tags TEXT DEFAULT '[]',
+      id TEXT PRIMARY KEY,           -- Unique scene ID (UUID)
+      storyboard_id TEXT NOT NULL,   -- Which storyboard this belongs to
+      scene_order INTEGER NOT NULL,  -- Position in sequence (1, 2, 3...)
+      title TEXT NOT NULL,           -- Scene name
+      description TEXT NOT NULL,     -- What happens in this scene
+      shot_type TEXT NOT NULL,       -- Wide Shot, Close-Up, etc.
+      camera_angle TEXT NOT NULL,    -- Eye Level, High Angle, etc.
+      duration INTEGER NOT NULL,     -- Length in seconds
+      scene_type TEXT NOT NULL,      -- A-Roll, B-Roll, Interview, etc.
+      location TEXT NOT NULL,        -- Where to film
+      props TEXT DEFAULT '[]',       -- JSON array of props needed
+      talent TEXT DEFAULT '[]',      -- JSON array of people in scene
+      lighting_notes TEXT,           -- Lighting instructions (optional)
+      audio_notes TEXT,              -- Audio requirements (optional)
+      camera_movement TEXT,          -- Pan, Zoom, Static, etc. (optional)
+      equipment TEXT DEFAULT '[]',   -- JSON array of gear needed
+      time_of_day TEXT,              -- Morning, Golden Hour, etc. (optional)
+      dialogue TEXT,                 -- Script/what people say (optional)
+      on_screen_text TEXT,           -- Text overlays to add (optional)
+      director_notes TEXT,           -- Instructions for crew (optional)
+      checklist TEXT DEFAULT '[]',   -- JSON array of todo items
+      priority TEXT DEFAULT 'Medium', -- Low, Medium, High, Critical
+      status TEXT DEFAULT 'Not Started', -- Not Started, In Progress, Completed
+      assigned_to TEXT,              -- Who's responsible (optional)
+      tags TEXT DEFAULT '[]',        -- JSON array of labels
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      -- When storyboard is deleted, its scenes are deleted too
       FOREIGN KEY (storyboard_id) REFERENCES storyboards(id) ON DELETE CASCADE
     )
   `);
 
-  // Visual references table
+  // -------------------------------------------------------------------------
+  // VISUAL REFERENCES TABLE
+  // -------------------------------------------------------------------------
+  // Images attached to scenes for reference/inspiration
   db.exec(`
     CREATE TABLE IF NOT EXISTS visual_references (
-      id TEXT PRIMARY KEY,
-      scene_id TEXT NOT NULL,
-      url TEXT NOT NULL,
-      caption TEXT,
-      ref_order INTEGER NOT NULL,
+      id TEXT PRIMARY KEY,           -- Unique reference ID
+      scene_id TEXT NOT NULL,        -- Which scene this belongs to
+      url TEXT NOT NULL,             -- Image URL
+      caption TEXT,                  -- Description of the image (optional)
+      ref_order INTEGER NOT NULL,    -- Display order (1, 2, 3...)
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      -- When scene is deleted, its references are deleted too
       FOREIGN KEY (scene_id) REFERENCES scenes(id) ON DELETE CASCADE
     )
   `);
 
-  // Comments table
+  // -------------------------------------------------------------------------
+  // COMMENTS TABLE
+  // -------------------------------------------------------------------------
+  // Feedback and notes on storyboards/scenes
   db.exec(`
     CREATE TABLE IF NOT EXISTS comments (
-      id TEXT PRIMARY KEY,
-      storyboard_id TEXT NOT NULL,
-      scene_id TEXT,
-      user_id TEXT NOT NULL,
-      user_name TEXT NOT NULL,
-      content TEXT NOT NULL,
+      id TEXT PRIMARY KEY,           -- Unique comment ID
+      storyboard_id TEXT NOT NULL,   -- Which storyboard
+      scene_id TEXT,                 -- Specific scene (optional)
+      user_id TEXT NOT NULL,         -- Who wrote it
+      user_name TEXT NOT NULL,       -- Author's display name (cached)
+      content TEXT NOT NULL,         -- The comment text
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      -- Cascading deletes for all foreign keys
       FOREIGN KEY (storyboard_id) REFERENCES storyboards(id) ON DELETE CASCADE,
       FOREIGN KEY (scene_id) REFERENCES scenes(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
-  // Storyboard collaborators table
+  // -------------------------------------------------------------------------
+  // STORYBOARD COLLABORATORS TABLE
+  // -------------------------------------------------------------------------
+  // Tracks who has access to which storyboards (sharing)
   db.exec(`
     CREATE TABLE IF NOT EXISTS storyboard_collaborators (
-      id TEXT PRIMARY KEY,
-      storyboard_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      permission TEXT NOT NULL,
+      id TEXT PRIMARY KEY,           -- Unique record ID
+      storyboard_id TEXT NOT NULL,   -- Which storyboard
+      user_id TEXT NOT NULL,         -- Who has access
+      permission TEXT NOT NULL,      -- 'view' or 'edit'
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (storyboard_id) REFERENCES storyboards(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      -- Each user can only have one permission level per storyboard
       UNIQUE(storyboard_id, user_id)
     )
   `);
 
-  // Storyboard versions table
+  // -------------------------------------------------------------------------
+  // STORYBOARD VERSIONS TABLE
+  // -------------------------------------------------------------------------
+  // Stores snapshots for version history
   db.exec(`
     CREATE TABLE IF NOT EXISTS storyboard_versions (
-      id TEXT PRIMARY KEY,
-      storyboard_id TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      data TEXT NOT NULL,
+      id TEXT PRIMARY KEY,           -- Unique version ID
+      storyboard_id TEXT NOT NULL,   -- Which storyboard
+      version INTEGER NOT NULL,      -- Version number (1, 2, 3...)
+      data TEXT NOT NULL,            -- JSON snapshot of entire storyboard
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      created_by TEXT NOT NULL,
+      created_by TEXT NOT NULL,      -- Who saved this version
       FOREIGN KEY (storyboard_id) REFERENCES storyboards(id) ON DELETE CASCADE,
       FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
-  // Templates table
+  // -------------------------------------------------------------------------
+  // TEMPLATES TABLE
+  // -------------------------------------------------------------------------
+  // Pre-made storyboard structures users can start from
   db.exec(`
     CREATE TABLE IF NOT EXISTS templates (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL,
-      type TEXT NOT NULL,
-      scenes TEXT NOT NULL,
-      is_system INTEGER DEFAULT 0,
-      user_id TEXT,
+      id TEXT PRIMARY KEY,           -- Unique template ID
+      name TEXT NOT NULL,            -- Template name
+      description TEXT NOT NULL,     -- What it's for
+      type TEXT NOT NULL,            -- Tutorial, Vlog, Review, etc.
+      scenes TEXT NOT NULL,          -- JSON array of pre-made scenes
+      is_system INTEGER DEFAULT 0,   -- 1=built-in, 0=user-created
+      user_id TEXT,                  -- Creator (null for system templates)
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
 
-  // Create indexes for common queries
+
+  // =========================================================================
+  // CREATE INDEXES FOR FASTER QUERIES
+  // =========================================================================
+  // Indexes are like the index in the back of a book - they help find
+  // things faster. Create indexes for columns you frequently search by.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_storyboards_user_id ON storyboards(user_id);
     CREATE INDEX IF NOT EXISTS idx_scenes_storyboard_id ON scenes(storyboard_id);
@@ -163,16 +259,32 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_collaborators_user ON storyboard_collaborators(user_id);
   `);
 
-  // Insert default system templates
+
+  // =========================================================================
+  // INSERT DEFAULT TEMPLATES
+  // =========================================================================
+  // Add built-in templates if they don't exist yet
   insertDefaultTemplates();
 
   console.log('Database initialized successfully');
 }
 
-function insertDefaultTemplates() {
-  const existingTemplates = db.prepare('SELECT COUNT(*) as count FROM templates WHERE is_system = 1').get() as { count: number };
-  if (existingTemplates.count > 0) return;
 
+// =========================================================================
+// DEFAULT TEMPLATES
+// =========================================================================
+/**
+ * Inserts the built-in storyboard templates.
+ * Only runs if there are no system templates yet.
+ *
+ * Each template includes pre-made scenes that give users a starting point.
+ */
+function insertDefaultTemplates() {
+  // Check if templates already exist
+  const existingTemplates = db.prepare('SELECT COUNT(*) as count FROM templates WHERE is_system = 1').get() as { count: number };
+  if (existingTemplates.count > 0) return; // Already have templates
+
+  // Define the built-in templates
   const templates = [
     {
       id: 'template-tutorial',
@@ -180,6 +292,7 @@ function insertDefaultTemplates() {
       description: 'A structured template for how-to and educational content',
       type: 'Tutorial',
       scenes: JSON.stringify([
+        // Each object represents a pre-made scene
         { title: 'Hook/Introduction', description: 'Grab attention and preview what viewers will learn', shotType: 'Medium Shot', cameraAngle: 'Eye Level', duration: 15, sceneType: 'A-Roll/Main Content', location: '', props: [], talent: [] },
         { title: 'Problem Statement', description: 'Explain the problem this tutorial solves', shotType: 'Medium Shot', cameraAngle: 'Eye Level', duration: 30, sceneType: 'A-Roll/Main Content', location: '', props: [], talent: [] },
         { title: 'Step 1', description: 'First step of the tutorial', shotType: 'Close-Up', cameraAngle: 'Eye Level', duration: 60, sceneType: 'A-Roll/Main Content', location: '', props: [], talent: [] },
@@ -265,14 +378,18 @@ function insertDefaultTemplates() {
     }
   ];
 
+  // Prepare the insert statement (more efficient than running separate queries)
   const insertTemplate = db.prepare(`
     INSERT OR IGNORE INTO templates (id, name, description, type, scenes, is_system)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
+  // Insert each template
   for (const template of templates) {
     insertTemplate.run(template.id, template.name, template.description, template.type, template.scenes, template.is_system);
   }
 }
 
+
+// Export the database connection for use in other files
 export default db;
